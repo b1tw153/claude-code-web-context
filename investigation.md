@@ -22,9 +22,11 @@ account identifiers) are deliberately left out.
 3. Project context comes from the repo clone. `.claude/CLAUDE.md` was loaded at
    startup. (Measured)
 4. A rule file added to `.claude/rules/` on GitHub mid-session was **not**
-   loaded after a fetch, **not** loaded immediately after the merge that put
-   it on disk, and **was** injected several turns later as a system reminder.
-   What triggered the reload is unknown. (Measured; cause Inferred)
+   loaded after a fetch, **not** loaded after the merge that put it on disk
+   (16:47), and not loaded during the following turns. It was injected 16
+   seconds after the session's `claude` process was **resumed** in a new
+   process (16:54:19, see T11). This is a re-read on resume, not live file
+   watching. (Measured)
 5. Auto memory is not operating in this session. There is no memory directory,
    no memory instructions in the system prompt, and "remember X" wrote
    nothing to disk. (Measured)
@@ -33,6 +35,13 @@ account identifiers) are deliberately left out.
    documented restart requirement when the `agents/` directory did not exist
    at session start. (Measured)
 7. The Gmail connector is available and a read-only search worked. (Measured)
+8. The harness-supplied system prompt text (GitHub rules, git rules,
+   environment notes) is not stored in any file that was found. It exists on
+   disk only as a `prompt_snapshot` record in the session transcript. (Measured;
+   delivery channel not found)
+9. The session was resumed in a new `claude` process at 16:54:19, launched by
+   the environment manager in "resume" mode. The session ID stayed the same.
+   (Measured; the reason for the resume is unknown)
 
 ## 2. Starting context
 
@@ -92,30 +101,90 @@ This is what the session provided before the first user question.
 | Why root | Unknown; the user's expectation would have been a non-privileged account | Not determined |
 | Clone time | Repo cloned at 16:20:43; `main` and the session branch started at the same commit | Measured |
 
-### `/root` layout (names only; credential-bearing dotfiles were not read)
-Toolchain directories (bun, cargo, rustup, gradle, nix, npm, uv/pip config,
-gcloud config), `.ccr/` (proxy certificates and README), and `.claude/`.
+### Home directory structure (`/root`)
 
-### `/root/.claude/` layout
-- Written by the harness in a burst at 16:20:43-45: `launcher-settings.json`,
-  three hook scripts, `skills/`, `plugins/`, `backups/`, `cache/`,
-  `environment-manager/`, `.last-cleanup`.
-- Created during the session: the transcript
-  (`projects/-home-user-claude-code-web-context/<session-id>.jsonl`),
-  `sessions/<n>.json`, a shell snapshot (created at 16:23 on first Bash use),
-  and a small `ccr-tip.json`.
-- Hook scripts:
+Names only, listed at about 17:24 UTC. Credential-bearing files
+(`.aws/`, `.ssh/`, `.boto`, `.claude.json`, session `.key` files) were not
+read. `<org-id>` stands for the account's organization identifier, and
+`<session-id>` for this session's identifier.
+
+```
+/root
+|-- .aws/                      (contents not read)
+|-- .bashrc, .profile, .gitconfig
+|-- .boto                      (not read)
+|-- .bun/                      bin/
+|-- .cache/                    Microsoft/, claude-cli-nodejs/, goimports/, uv/
+|-- .cargo/                    bin/, env
+|-- .ccr/                      README.md, agent-proxy-ca.crt, ca-bundle.crt,
+|                              system-trust.ca.pem, nssdb-*.checked-v1 (2 files)
+|-- .claude/                   (expanded below)
+|-- .claude.json               (not read)
+|-- .config/                   gcloud/, pip/, uv/
+|-- .gradle/                   native/, notifications/
+|-- .local/                    bin/, lib/, share/
+|-- .nix-defexpr/              channels -> (link)
+|-- .nix-profile -> /nix/var/nix/profiles/per-user/root/profile
+|-- .npm/                      _cacache/, _logs/
+|-- .pki/                      nssdb/
+|-- .rustup/                   downloads/, settings.toml, tmp/, toolchains/,
+|                              update-hashes/
+`-- .ssh/                      (contents not read)
+```
+
+```
+/root/.claude
+|-- .last-cleanup
+|-- backups/                   .claude.json.backup.<epoch>  (2 files: 16:20:43, 16:54:21)
+|-- cache/
+|   `-- model-catalog/         <org-id>-<hash>-ccr.json
+|-- environment-manager/       code-sign -> /opt/env-runner/environment-manager (symlink),
+|                              codesign-mcp-config.json
+|-- launcher-settings.json     (not read)
+|-- plugins/
+|   |-- store/                 cc-plugin-agents-md_builtin-<hash>.json
+|   `-- synced/<org-id>_<id>/  account-synced plugin bucket (marker file only at top level)
+|-- projects/
+|   `-- -home-user-claude-code-web-context/
+|       |-- <session-id>.jsonl         the session transcript
+|       `-- <session-id>/              subagents/, ccr-tip.json
+|-- session-env/<session-id>/
+|-- session-start-setup-script-failure.sh
+|-- sessions/                  103.json, 103.<hash>.key   (90.* from the first process is gone)
+|-- shell-snapshots/           snapshot-bash-<epoch>-<id>.sh
+|-- skills/
+|   |-- session-start-hook/    SKILL.md
+|   `-- synced/<org-id>_<id>/  built-in-browser, chrome-browser, computer-use,
+|                              deep-research, docs, docx, google-workspace,
+|                              import-memory, morning, pdf, pptx, skill-creator,
+|                              xlsx, manifest.json
+|-- stop-hook-git-check.sh
+|-- uploads/<session-id>/      15835037-claude-code.md (the uploaded reference
+|                              document), .saved-uploads.jsonl
+`-- user-prompt-submit-reply-reminder.py
+```
+
+Notes on the layout:
+- **Harness-provisioned at 16:20:43-45:** `launcher-settings.json`, the three
+  hook scripts, `skills/`, `plugins/`, `cache/`, `environment-manager/`, the
+  first backup, and `.last-cleanup`.
+- **Created or changed during the session:** the transcript and its
+  `<session-id>/` directory, `sessions/` (replaced when the process resumed),
+  the second backup (16:54:21), the shell snapshot (regenerated at 16:58:38),
+  and `uploads/` (added when the reference document was uploaded).
+- **Absent:** `~/.claude/CLAUDE.md`, `settings.json`, `memory/`, `rules/`,
+  `agents/`.
+- **Hook scripts:**
   - `stop-hook-git-check.sh` blocks finishing while there are uncommitted
     changes, untracked files, unpushed commits, or commits not signed as the
-    expected identity. It produced the "unpushed commit" feedback seen during
-    the session.
+    expected identity. It produced the "unpushed commit" feedback during the
+    session.
   - `session-start-setup-script-failure.sh` reports a failed environment setup
     script; inert here because no failure note exists.
   - `user-prompt-submit-reply-reminder.py` is Slack-specific and does nothing
     unless an environment variable is set; most likely inert here (Inferred).
-- `skills/` holds `session-start-hook/` (bundled) and `synced/<org>_<id>/`
-  (the account-synced skills).
-- Absent: `CLAUDE.md`, `settings.json`, `memory/`, `rules/`, `agents/`.
+- **Synced skills** are the account-level content that reached the session.
+  They match the `anthropic-skills:*` entries in the startup skills listing.
 
 ## 4. Tests and results
 
@@ -172,15 +241,15 @@ gcloud config), `.ccr/` (proxy certificates and README), and `.claude/`.
   4. On a later turn a system reminder arrived containing the file's contents,
      labeled as instruction files "re-read when this session started" and
      replacing earlier copies. Afterwards the model could state the rule.
-- **Conclusion:** A newly added unscoped rule file **was** loaded without the
-  model reading it, but not immediately and not at a time the model could
-  predict. The `.claude/rules/` directory did not exist at session start, so
-  this differs from the agent behavior in T6.
-- **Open:** What triggered the reload (a harness re-read, a session resume,
-  or something about turn count) is not known. The reminder's wording ("when
-  this session started") does not match what actually happened and is
-  unexplained. The uploaded reference document (section 5) does not describe
-  mid-session loading of rule files.
+- **Conclusion (revised after T11):** The rule file was loaded without the
+  model reading it, but only after the session's `claude` process was resumed
+  at 16:54:19. In the original process the file sat on disk from 16:47 and was
+  never injected. So this was a re-read on resume, not live watching. An
+  earlier version of this document treated it as an unexplained mid-session
+  reload; that was wrong. The reminder's wording ("re-read when this session
+  started") is consistent with a new process start.
+- **Not tested:** whether a rule added to a directory that already existed
+  would be picked up by live watching within a single process.
 
 ### T6. Project agent added mid-session
 - **Setup:** A `claude-code-guide` subagent was asked how to create a project
@@ -195,7 +264,9 @@ gcloud config), `.ccr/` (proxy certificates and README), and `.claude/`.
     not found" and listed the same six agents.
 - **Conclusion:** Matches the documented rule that a restart is required when
   the `agents/` directory did not exist at session start. It is not evidence
-  that the directory watcher fails when the directory already existed.
+  that the directory watcher fails when the directory already existed. The
+  directory also did not exist when the process was resumed (T11), because the
+  agent file was created after the rule reminder arrived.
 - **Caveat (Not verified):** A silently skipped file (bad frontmatter) was not
   ruled out with `claude --debug` or `claude plugin validate`.
 
@@ -219,13 +290,73 @@ gcloud config), `.ccr/` (proxy certificates and README), and `.claude/`.
 - A document describing Claude Code context loading was uploaded for
   comparison; the comparison is in section 5.
 
+### T10. Where the harness-supplied system prompt text lives
+- **Question:** Does the GitHub and environment rule text in the system prompt
+  exist as a file in the container?
+- **Method:** Searched for seven distinctive phrases in text files under the
+  config and system directories (`/root/.claude` excluding the transcript,
+  `/root/.ccr`, `/root/.config`, `/etc`, `/home`, `/usr/local`,
+  `/opt/claude-code`, `/root/.local/share`), in every running process's
+  `cmdline` and `environ` (match counts only), and in the environment-manager
+  and `claude` binaries. Then inspected the transcript.
+- **Result (Measured):**
+  - No file contains the text. No process argument or environment variable
+    contains it. The environment-manager binary does not contain it. The
+    `claude` binary contains only the tool name `subscribe_pr_activity`, none
+    of the rule prose.
+  - The transcript records the system prompt in two `prompt_snapshot`
+    attachments (16:20:45 and 16:20:57), identical in their `systemPrompt`
+    field. That field has 11 blocks: 10 base blocks (with a
+    `__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__` marker after the second) and one
+    14,846-character block titled "Your current remote execution
+    environment". That last block holds the GitHub rules, the git branch rules,
+    the repository scope, the environment documentation pointer, and the proxy
+    and browser notes.
+- **Conclusion (Inferred):** The rules are supplied by the harness at launch as
+  an appended prompt block. They are not baked into the CLI and are not kept in
+  a config file; the transcript only records them. How they are delivered to
+  the CLI was not found.
+- **Limits:** A whole-disk text search timed out, so `/nix`, `/opt/node22`,
+  package caches and `/tmp` were not searched. Absence of matches does not
+  rule out encoded or split text.
+
+### T11. The session's `claude` process was resumed at 16:54:19
+- **Evidence (Measured):**
+  - The first process left `sessions/90.json`. It is gone, replaced by
+    `sessions/103.json`, which records pid 103, the same session ID, start
+    time 16:54:21, CLI version 2.1.317, `entrypoint: remote`, and
+    `kind: interactive`.
+  - `ps` shows `claude` pid 103 started at 16:54:19 with
+    `--preload /home/claude/.claude/remote/spare.sock`, one second after
+    an `environment-manager task-run --stdin --session <id> --session-mode resume`
+    process started (16:54:18).
+  - A second `.claude.json` backup was written at 16:54:21. The original shell
+    snapshot (16:23:39) is gone and a new one was created at 16:58:38, on the
+    first Bash call after the restart.
+  - In the transcript, the only `instructions` attachments are the startup one
+    (16:20:45) and one at 16:54:35 that contains the rule text, 16 seconds
+    after the new process started.
+- **Conclusion:** The harness restarted the CLI in resume mode mid-conversation.
+  The new process re-read the instruction files and picked up the rule file.
+  This explains T5.
+- **Inferred:** The `--preload ... spare.sock` argument suggests the new process
+  was a pre-started spare, and the `/home/claude` path may be why that user
+  directory exists. This was not verified.
+- **Not determined:** Why the resume happened. It could be an idle checkpoint,
+  a per-message mechanism, or something else. The process stayed the same for
+  the rest of the session (still pid 103 at 17:24).
+- **Side finding:** The transcript contains 7 `task_reminder` attachments
+  (first at 16:28:26) and 28 `stop_hook_summary` entries. The task reminders
+  seen during the session are a built-in CLI attachment type, not output from
+  the hook scripts.
+
 ## 5. Comparison with the uploaded reference document
 
 | Area | Document says | Observed | Fit |
 |---|---|---|---|
 | Project `CLAUDE.md` | Loaded at launch | `.claude/CLAUDE.md` arrived at startup | Matches |
 | User `~/.claude/CLAUDE.md` | Loaded first if present | Not present | Matches (absent) |
-| Unscoped rule | Loads at launch | Added mid-session; injected several turns later | Not covered |
+| Unscoped rule | Loads at launch | Added mid-session; loaded only after the process was resumed (T11) | Consistent with launch-time loading (resume re-reads) |
 | Auto memory | `~/.claude/projects/<project>/memory/`, `MEMORY.md` loaded at start; "remember" writes a file | No directory, no instructions, nothing written | Does not apply here |
 | Skills | Listed at start; user skills at `~/.claude/skills/`; account-synced skills exist | Listing at start; synced skills present | Matches |
 | Agents | Listed at start; directory watched; restart needed if `agents/` was missing at start | Not listed; Agent tool rejected it | Matches |
@@ -237,8 +368,9 @@ environment instructions).
 
 ## 6. Open questions
 
-1. What triggered the mid-session rule reload, and does it also apply to edits
-   of an existing `CLAUDE.md`?
+1. Why did the harness resume the session in a new process at 16:54:19, and
+   does it happen on a pattern (idle time, message count) or at random? Does
+   the new process also pick up edits to an existing `CLAUDE.md`?
 2. Why is auto memory absent: a setting, a cloud-harness default, or something
    else?
 3. Does a fresh session on this branch list `goose-expert` at startup and
@@ -264,11 +396,17 @@ environment instructions).
    memory-related settings.
 7. **Validate the agent file** with `claude --debug` or
    `claude plugin validate .claude/agents`.
+8. **Same-process rule test:** add a rule file to a rules directory that
+   already existed at the start of the current process, without a resume, and
+   check whether live watching picks it up.
 
 ## 8. Corrections and caveats
 
 - An early guess that a task-tool reminder came from one of the hook scripts
-  was wrong; none of the scripts produce it.
+  was wrong; none of the scripts produce it. It is a built-in `task_reminder`
+  attachment (T11).
+- The first write-up of T5 treated the rule reload as a mid-session event. The
+  later finding that the process was resumed (T11) replaced that conclusion.
 - An early statement that nothing had loaded after the merge was true at that
   moment and later superseded by the reminder in T5.
 - Timestamps are from file metadata; turn-by-turn timing for events without a
