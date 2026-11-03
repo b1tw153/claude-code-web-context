@@ -350,6 +350,52 @@ Notes on the layout:
   seen during the session are a built-in CLI attachment type, not output from
   the hook scripts.
 
+### T12. Fresh session on the branch (second session, 2026-11-03)
+
+A new session was started after the first one ended. It ran on its own branch,
+`claude/amazing-faraday-epuupd`, cut from `main` after PR #1's branch was
+pushed. These results come from that session.
+
+- **T12a. Restart test (proposed test 7.1, open question 3). Measured.**
+  - `.claude/CLAUDE.md` (`Keyword: Umbrella`) and
+    `.claude/rules/minimegastructures.md` were both in context from the first
+    turn, before any file was read. The rule is unscoped and arrived in the
+    startup system reminder.
+  - `goose-expert` was in the startup agent list and the Agent tool accepted it
+    by name. This confirms T6: the agent was missing earlier only because
+    `.claude/agents/` did not exist when that process started.
+  - A project skill (`las-vegas-piece`, in `.claude/skills/`) was listed at
+    startup and ran when invoked. Project skills, agents, `CLAUDE.md` and
+    rules all load at launch.
+- **T12b. Memory test ("granola"). Measured.** At the end of the first session
+  the user asked the model to remember "granola" without it being written to a
+  file. The new session did not know it. Auto memory is still absent: no memory
+  instructions or memory tool appeared. This is the predicted outcome.
+- **T12c. Session transcripts as a reference. Measured.**
+  - The previous session's transcript is readable from a new session through
+    `list_sessions` and `list_events` (claude-code-remote tools). The "granola"
+    request was found there.
+  - Nothing loads transcripts automatically. The new session found it only
+    because the user asked and the model went looking.
+  - The raw event list was about 290K characters for 66 events, too large to
+    read directly; it had to be parsed with a script.
+  - This is a lookup record, not memory.
+- **T12d. Subagent inheritance (proposed test 7.2, open question 4). Measured,
+  with a caveat.**
+  - `goose-expert` has only the `Read` tool. It was asked what
+    minimegastructures are, and told not to read files.
+  - It answered that it knew of no established meaning but that "the project
+    rule already in my context" says "Most minimegastructures are ducks".
+  - Project rules in `.claude/rules/` therefore reach subagents, as the
+    reference document says.
+  - Only the rule text was inherited; the agent had no other knowledge of the
+    term.
+  - **Caveat:** The usage line showed `tool_uses: 1`. A trivial goose question
+    to the same agent also showed 1, so this is most likely the agent's
+    hand-back call and not a file read. That was not verified. The claim that no
+    file was read is the agent's own. The subagent transcript under
+    `projects/.../<session-id>/subagents/` was not inspected.
+
 ## 5. Comparison with the uploaded reference document
 
 | Area | Document says | Observed | Fit |
@@ -373,19 +419,23 @@ environment instructions).
    the new process also pick up edits to an existing `CLAUDE.md`?
 2. Why is auto memory absent: a setting, a cloud-harness default, or something
    else?
-3. Does a fresh session on this branch list `goose-expert` at startup and
-   include the minimegastructures rule in context from the start?
-4. Do subagents inherit project rules? The reference document says they do.
+3. ~~Does a fresh session on this branch list `goose-expert` at startup and
+   include the minimegastructures rule in context from the start?~~ **Answered
+   (T12a):** yes to both.
+4. ~~Do subagents inherit project rules? The reference document says they do.~~
+   **Answered (T12d):** yes, with the tool-use caveat noted there.
 5. Why does the session run as root when a `claude` user exists?
 6. What does `launcher-settings.json` register (not read yet)?
 
 ## 7. Proposed next tests
 
-1. **Restart test:** start a fresh session on this branch and ask about
-   minimegastructures and about `goose-expert` without any hints.
-2. **Subagent inheritance:** ask `goose-expert` (Read tool only) what
+1. ~~**Restart test:** start a fresh session on this branch and ask about
+   minimegastructures and about `goose-expert` without any hints.~~ **Done
+   (T12a).**
+2. ~~**Subagent inheritance:** ask `goose-expert` (Read tool only) what
    minimegastructures are. If rules reach subagents it should answer "ducks"
-   without reading a file.
+   without reading a file.~~ **Done (T12d).** To close the caveat, inspect the
+   subagent transcript for a `Read` call.
 3. **Path-scoped rule:** add a rule with a `paths:` glob and check that it loads
    only when a matching file is touched.
 4. **Nested `CLAUDE.md`:** add one in a subdirectory and check that it loads
