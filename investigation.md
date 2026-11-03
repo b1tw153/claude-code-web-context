@@ -42,6 +42,21 @@ account identifiers) are deliberately left out.
 9. The session was resumed in a new `claude` process at 16:54:19, launched by
    the environment manager in "resume" mode. The session ID stayed the same.
    (Measured; the reason for the resume is unknown)
+10. In a second, new conversation on the same repo, `CLAUDE.md`, the rule, the
+    `goose-expert` agent and the `las-vegas-piece` skill all loaded at startup,
+    so the mid-session limits in findings 4 and 6 are load-time behavior, as in
+    local Claude Code. (Measured, T12a)
+11. Subagents receive the project instruction files by injection, verified from
+    the subagent transcript: no file was read and the rule text is in the
+    transcript before the agent answered. (Measured, T12d)
+12. Each conversation gets its own VM, booted about a second before the session
+    is created. Nothing from a previous conversation is on the VM's disk except
+    the git repo. The previous transcript was readable only through the
+    server-side `list_sessions` and `list_events` calls, and nothing loads it
+    automatically. (Measured, T12c and T12e)
+13. The harness (`environment-manager` and `claude`) runs as root, and the
+    `claude` user owns no running process. The reason is not determined.
+    (Measured, T12e)
 
 ## 2. Starting context
 
@@ -478,19 +493,35 @@ environment instructions).
    minimegastructures are. If rules reach subagents it should answer "ducks"
    without reading a file.~~ **Done (T12d),** including the check of the
    subagent transcript for a `Read` call (none).
-3. **Path-scoped rule:** add a rule with a `paths:` glob and check that it loads
-   only when a matching file is touched.
-4. **Nested `CLAUDE.md`:** add one in a subdirectory and check that it loads
-   only after a file in that directory is read.
-5. **Existing-file edit:** change `.claude/CLAUDE.md` mid-session and see
-   whether the new text is injected.
-6. **Auto memory:** in a fresh session, check for a `memory/` directory and any
-   memory-related settings.
-7. **Validate the agent file** with `claude --debug` or
-   `claude plugin validate .claude/agents`.
-8. **Same-process rule test:** add a rule file to a rules directory that
+3. ~~**Path-scoped rule:** add a rule with a `paths:` glob and check that it
+   loads only when a matching file is touched.~~ **Skipped:** documented local
+   Claude Code behavior, not specific to this environment.
+4. ~~**Nested `CLAUDE.md`:** add one in a subdirectory and check that it loads
+   only after a file in that directory is read.~~ **Skipped:** same reason.
+5. ~~**Existing-file edit:** change `.claude/CLAUDE.md` mid-session and see
+   whether the new text is injected.~~ **Skipped:** same reason.
+6. ~~**Auto memory:** in a fresh session, check for a `memory/` directory and
+   any memory-related settings.~~ **Partly done (T12b):** the second session
+   also had no memory instructions or memory tool. A `memory/` directory
+   under `projects/` was not checked for.
+7. ~~**Validate the agent file** with `claude --debug` or
+   `claude plugin validate .claude/agents`.~~ **Moot:** the agent loaded and ran
+   in the second session (T12a), so the file is valid.
+8. ~~**Same-process rule test:** add a rule file to a rules directory that
    already existed at the start of the current process, without a resume, and
-   check whether live watching picks it up.
+   check whether live watching picks it up.~~ **Skipped:** same reason as 3-5.
+
+Tests worth running because they are specific to the cloud environment:
+
+9. **Parked-session persistence:** write a marker file outside the repo, let
+   the session sit idle, then check for it after the session is picked up.
+   This also bears on open question 1 (the 16:54:19 relaunch).
+10. **Idle gap before the relaunch:** read the first session's transcript for
+    the time between its last activity and 16:54:19, to test the idle-stop
+    explanation.
+11. **Continuity note:** add a line to `.claude/CLAUDE.md` telling a new session
+    to check recent sessions for prior context, then repeat the "remember X"
+    test in a fresh conversation to see whether it recovers X.
 
 ## 8. Corrections and caveats
 
