@@ -380,8 +380,7 @@ pushed. These results come from that session.
   - The raw event list was about 290K characters for 66 events, too large to
     read directly; it had to be parsed with a script.
   - This is a lookup record, not memory.
-- **T12d. Subagent inheritance (proposed test 7.2, open question 4). Measured,
-  with a caveat.**
+- **T12d. Subagent inheritance (proposed test 7.2, open question 4). Measured.**
   - `goose-expert` has only the `Read` tool. It was asked what
     minimegastructures are, and told not to read files.
   - It answered that it knew of no established meaning but that "the project
@@ -390,11 +389,53 @@ pushed. These results come from that session.
     reference document says.
   - Only the rule text was inherited; the agent had no other knowledge of the
     term.
-  - **Caveat:** The usage line showed `tool_uses: 1`. A trivial goose question
-    to the same agent also showed 1, so this is most likely the agent's
-    hand-back call and not a file read. That was not verified. The claim that no
-    file was read is the agent's own. The subagent transcript under
-    `projects/.../<session-id>/subagents/` was not inspected.
+  - **Verified from the subagent transcript**
+    (`projects/.../<session-id>/subagents/agent-<id>.jsonl`):
+    - The only tool call was `SubagentHandback`, which delivers the report.
+      There was no `Read`. The `tool_uses: 1` in the usage line was the
+      hand-back call. A trivial goose question to the same agent also showed
+      `tool_uses: 1` and also contains only the hand-back.
+    - The rule text is in the subagent's transcript before it answered, as an
+      `instructions` attachment (`.claude/rules/minimegastructures.md`, type
+      `Project`) and inside a `system-reminder` block headed "project
+      instructions, checked into the codebase".
+    - Inheritance is therefore by injection: the harness gives subagents the
+      project instruction files directly.
+- **T12e. VM per conversation and what carries over. Measured and inferred.**
+  - The new session's VM booted at 17:32:49, one second before the session was
+    created (17:32:50). The user confirmed the second session was a new
+    conversation that happened to use the same git repo.
+  - On the VM's disk, `/root/.claude/projects/` held only this session's
+    transcript and its subagent transcripts. No other session's `.jsonl`
+    exists anywhere under `/root` or `/home`. The previous session's
+    transcript was readable only through the server-side `list_events` call,
+    not from the disk.
+  - What reached the VM from the first session was the git repo
+    (`investigation.md`, the rule, the agent, the skill). The repo and the
+    transcript API are the only persistent state seen.
+  - Process owner (Q5): `environment-manager` (pid 150) and `claude` (pid 166)
+    both run as root, started by PID 1 (`process_api --firecracker-init`). No
+    process runs as the `claude` user (uid 999). The harness files in
+    `/home/claude/.claude/` (hook scripts, `launcher-settings.json`, OAuth and
+    session-ingress tokens) are root-owned, written at 17:32:55 after boot.
+    The `claude` user exists from the image build (Oct 27) and owns only its
+    `.cache`, `.config` and `.ssh`. Why the harness runs as root is still not
+    determined (Inferred: the image was built for a non-root user, but the
+    harness runs as root and uses `/home/claude` as a state directory).
+  - `environment-manager` was started with `--session-mode resume-cached`.
+    The first session's relaunch used `resume`. Because this was a new
+    conversation with no history, the mode flag appears to be the harness's
+    normal launch path and is **not** evidence that a stop and restore
+    occurred. An earlier inference in this session that it was evidence was
+    retracted.
+  - Files dated 16:19:54 under `/home/claude` on a VM booted at 17:32:49 are
+    unexplained. A cached environment snapshot built when the first session
+    started is the likeliest cause (Inferred, not verified).
+  - **Not tested:** whether a session that is parked and picked up later keeps
+    files that are not part of the git repo. A test would write a marker file
+    outside the repo, let the session sit idle, then look for the file after it
+    is picked up. The 16:54:19 relaunch in the first session might have been
+    such a case, but whether non-git files survived it was not recorded.
 
 ## 5. Comparison with the uploaded reference document
 
@@ -423,7 +464,8 @@ environment instructions).
    include the minimegastructures rule in context from the start?~~ **Answered
    (T12a):** yes to both.
 4. ~~Do subagents inherit project rules? The reference document says they do.~~
-   **Answered (T12d):** yes, with the tool-use caveat noted there.
+   **Answered (T12d):** yes, by injection, verified from the subagent
+   transcript.
 5. Why does the session run as root when a `claude` user exists?
 6. What does `launcher-settings.json` register (not read yet)?
 
@@ -434,8 +476,8 @@ environment instructions).
    (T12a).**
 2. ~~**Subagent inheritance:** ask `goose-expert` (Read tool only) what
    minimegastructures are. If rules reach subagents it should answer "ducks"
-   without reading a file.~~ **Done (T12d).** To close the caveat, inspect the
-   subagent transcript for a `Read` call.
+   without reading a file.~~ **Done (T12d),** including the check of the
+   subagent transcript for a `Read` call (none).
 3. **Path-scoped rule:** add a rule with a `paths:` glob and check that it loads
    only when a matching file is touched.
 4. **Nested `CLAUDE.md`:** add one in a subdirectory and check that it loads
