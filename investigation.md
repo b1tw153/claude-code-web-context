@@ -70,8 +70,12 @@ account identifiers) are deliberately left out.
 16. A project skill committed on GitHub was not available to the running
     conversation. The model answered a question about it from general
     knowledge, because the skill file was on the remote but not in the working
-    tree. It is on disk only after a fetch and merge, and no skill listing
-    update had reached the model at the time of this edit. (Measured, T15)
+    tree. It appeared on disk only after a fetch and merge. A few turns after
+    the merge a listing update reached the running process without a reload or
+    restart, and the skill then ran when invoked. (Measured, T15)
+17. This environment offers slash commands like local Claude Code, including
+    `/reload-skills`. Desktop/Web does not. The user saw this at the prompt;
+    the model cannot see the menu. (User-observed, T16)
 
 ## 2. Starting context
 
@@ -542,6 +546,11 @@ conversation and came back.
   An idle threshold of roughly five to six minutes would fit the data, but
   four gaps are too few to estimate it, and the harness's own timers were not
   observed.
+- **Marker test (set up, result pending):** A purpose-made marker file,
+  `/root/.claude/marker-test.txt`, was written at 18:19:09 UTC by pid 104. It is
+  outside the repo, so git does not carry it. After the next resume it should
+  still be there, with the new process showing a different pid. In a new
+  conversation it should be absent, if each conversation gets its own VM (T12e).
 - **Coincidence with GitHub activity (Inferred, not tested):** The user's
   commits on GitHub are timestamped UTC-8, the session's are UTC. `Create
   SKILL.md` (`aa615e4`) at 08:53:18-08:00 is 16:53:18 UTC, 61 seconds before
@@ -561,16 +570,41 @@ conversation and came back.
   it. It did not consult the skill. After a fast-forward to `main` the file is
   on disk. It carries a specific coordinate for the work, which the model's
   answer did not have. The coordinate and the answer were not compared further.
-- **Not tested:** whether the running process lists or runs the skill after the
-  fast-forward. No skill listing update had reached the model at the time of
-  this edit. The reference document says a skills directory created after the
-  process starts is read only after `/reload-skills`, and `.claude/skills/` was
-  not in the working tree when process 104 started.
+- **Listing (Measured, added later):** A few turns after the fast-forward, and
+  just after the marker file in T14 was written (18:19:09), a message listing
+  `las-vegas-piece` as an available skill reached the model. It arrived in the
+  same process (pid 104), with no `/reload-skills` and no restart. The reference
+  document says a skills directory created after the process starts is read
+  only after `/reload-skills`, and `.claude/skills/` was not in the working
+  tree when process 104 started. What triggered the listing is not known.
+- **Invocation (Measured):** At the user's request the model invoked the skill
+  through the `Skill` tool. It ran and returned the body of `SKILL.md`: one
+  sentence giving a coordinate for the work.
 - **Conclusion:** A skill committed on GitHub is not part of a running
-  conversation until the repo is updated, and a new `.claude/skills/`
-  directory probably needs a further load step after that. This agrees with T4
-  and with T12a, where a new conversation cloned the repo fresh and listed the
-  skill at startup.
+  conversation until the repo is updated. Once the file was in the working
+  tree it was listed and ran in the same process without a reload step, which
+  is more permissive than the reference document describes. Whether
+  `/reload-skills` would have made the listing appear sooner was not tested.
+  This agrees with T4 and with T12a, where a new conversation cloned the repo
+  fresh and listed the skill at startup.
+- **Not verified:** the coordinate in the skill. The model had no source to
+  check it against.
+
+### T16. Slash commands (user-observed)
+- **Observation (user, not captured):** The user listed the `/` commands at the
+  prompt in this environment and reported they look more or less like local
+  Claude Code's, including commands such as `/reload-skills`. Claude
+  Desktop/Web has no such commands.
+- **What the model can confirm (Measured):** The session record shows
+  `entrypoint: remote` and `kind: interactive` with CLI version 2.1.317 (T11),
+  so the real CLI is running. The system prompt tells the model to invoke
+  `/<skill-name>` through the `Skill` tool, and bundled skills such as `init`,
+  `security-review`, `loop` and `simplify` are in the startup listing.
+- **Not captured:** the actual command list. The model cannot see the prompt's
+  menu. A pasted list or screenshot would make this a measured result.
+- **Conclusion (Inferred):** The slash-command menu comes with the CLI front
+  end, which is consistent with every other finding that this is Claude Code
+  and not the Desktop/Web context system.
 
 ## 5. Comparison with the uploaded reference document
 
@@ -581,7 +615,7 @@ conversation and came back.
 | Unscoped rule | Loads at launch | Added mid-session; loaded only after the process was resumed (T11) | Consistent with launch-time loading (resume re-reads) |
 | Auto memory | `~/.claude/projects/<project>/memory/`, `MEMORY.md` loaded at start; "remember" writes a file | No directory, no instructions, nothing written | Does not apply here |
 | Skills | Listed at start; user skills at `~/.claude/skills/`; account-synced skills exist | Listing at start; synced skills present | Matches |
-| New project skills directory | Read only after `/reload-skills` if created after the session starts | Skill added on GitHub was not in the running conversation; a fresh conversation listed it at startup (T12a, T15) | Consistent (reload step not tested) |
+| New project skills directory | Read only after `/reload-skills` if created after the session starts | Not available until the pull; then listed in the running process a few turns later without a reload and invoked successfully (T15); a fresh conversation listed it at startup (T12a) | More permissive than the document |
 | Agents | Listed at start; directory watched; restart needed if `agents/` was missing at start | Not listed; Agent tool rejected it | Matches |
 | Project key | Follows the git toplevel | `projects/-home-user-claude-code-web-context/` | Matches |
 
@@ -643,8 +677,8 @@ Tests worth running because they are specific to the cloud environment:
 9. ~~**Parked-session persistence:** write a marker file outside the repo, let
    the session sit idle, then check for it after the session is picked up.~~
    **Partly done (T14):** non-git files created before each resume were present
-   after it. No purpose-made marker was written, so a deliberate marker test is
-   still cleaner.
+   after it. A purpose-made marker was then set up at 18:19:09 (T14); its result
+   is pending.
 10. ~~**Idle gap before the relaunch:** read the first session's transcript for
     the time between its last activity and 16:54:19, to test the idle-stop
     explanation.~~ **Done (T14):** 5 min 52 s before resume 1 and 37 min 49 s
@@ -652,9 +686,11 @@ Tests worth running because they are specific to the cloud environment:
 11. **Continuity note:** add a line to `.claude/CLAUDE.md` telling a new session
     to check recent sessions for prior context, then repeat the "remember X"
     test in a fresh conversation to see whether it recovers X.
-12. **Skill after pull:** in a running conversation, fast-forward to a commit
+12. ~~**Skill after pull:** in a running conversation, fast-forward to a commit
     that adds a project skill, then check whether it is listed or can be
-    invoked, and whether `/reload-skills` changes that (T15).
+    invoked, and whether `/reload-skills` changes that (T15).~~ **Done (T15):**
+    listed without a reload and invoked successfully. Whether `/reload-skills`
+    would have been faster was not tested.
 13. **Idle threshold:** idle a conversation for fixed intervals (for example
     3, 5 and 8 minutes) and check the `sessions/` file and process start times
     to find where a resume begins.
@@ -668,6 +704,9 @@ Tests worth running because they are specific to the cloud environment:
   later finding that the process was resumed (T11) replaced that conclusion.
 - An early statement that nothing had loaded after the merge was true at that
   moment and later superseded by the reminder in T5.
+- The first version of T15 said no listing update had reached the model. That
+  was true when written and was superseded by the later listing and the
+  successful invocation (T15).
 - Commit times on GitHub's web UI are recorded at UTC-8 and the session's own
   commits in UTC. An earlier note that the 09:xx commit times "did not line up
   with a UTC session day" was a time-zone mismatch, confirmed from the ISO
