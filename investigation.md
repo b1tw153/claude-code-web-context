@@ -57,6 +57,10 @@ account identifiers) are deliberately left out.
 13. The harness (`environment-manager` and `claude`) runs as root, and the
     `claude` user owns no running process. The reason is not determined.
     (Measured, T12e)
+14. `launcher-settings.json` registers two hooks (`SessionStart` and `Stop`)
+    and denies the model read access to the harness tokens and edit access to
+    the harness control files. These are tool-level rules, not an OS boundary,
+    since the shell runs as root. (Measured, T13)
 
 ## 2. Starting context
 
@@ -452,6 +456,35 @@ pushed. These results come from that session.
     is picked up. The 16:54:19 relaunch in the first session might have been
     such a case, but whether non-git files survived it was not recorded.
 
+### T13. `launcher-settings.json` (open question 6)
+
+- **Method:** Read `/root/.claude/launcher-settings.json` with values redacted
+  where a key or value looked like a credential. Compared it with the copy in
+  `/home/claude/.claude/`.
+- **Result (Measured):**
+  - The two copies are byte-identical. The file contains no credentials.
+  - It is a Claude Code settings file (`$schema`:
+    `json.schemastore.org/claude-code-settings.json`).
+  - **Hooks (two):** `SessionStart` runs
+    `~/.claude/session-start-setup-script-failure.sh`, and `Stop` runs
+    `~/.claude/stop-hook-git-check.sh`. This is why the stop hook produces the
+    "unpushed commit" feedback.
+  - `user-prompt-submit-reply-reminder.py` is not registered as a hook. It
+    appears only in the deny list. This confirms it is inert here.
+  - **Permissions:** `allow` is only `Skill`. `deny` has two groups:
+    - Read: `~/.claude/remote` (holds the OAuth and session-ingress tokens)
+      and `/run/ccr`.
+    - Edit: `launcher-settings.json`, `stop-hook-git-check.sh` and
+      `user-prompt-submit-reply-reminder.py`, under the `~`, `/root` and
+      `/home/claude` path spellings.
+- **Conclusion:** The harness registers two hooks and protects its credentials
+  and its own control files from the model through permission rules. These rules
+  do not stop a root shell: Bash runs as root and could read or change those
+  files, so this is a guardrail on the tools, not an operating-system
+  boundary. The denied paths were not accessed.
+- **Not determined:** How the file reaches the CLI (a `--settings` flag or a
+  settings lookup). The `claude` process arguments were not checked for it.
+
 ## 5. Comparison with the uploaded reference document
 
 | Area | Document says | Observed | Fit |
@@ -482,7 +515,10 @@ environment instructions).
    **Answered (T12d):** yes, by injection, verified from the subagent
    transcript.
 5. Why does the session run as root when a `claude` user exists?
-6. What does `launcher-settings.json` register (not read yet)?
+6. ~~What does `launcher-settings.json` register (not read yet)?~~
+   **Answered (T13):** two hooks (`SessionStart`, `Stop`) plus permission rules
+   that protect the harness's tokens and control files. How the file reaches the
+   CLI is not determined.
 
 ## 7. Proposed next tests
 
