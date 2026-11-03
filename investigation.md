@@ -1,13 +1,16 @@
 # Investigation: How a Claude Code Web Session Loads Context
 
-Date of session: 2026-11-03 (all times UTC, taken from file timestamps where
-given). Repo: `claude-code-web-context`, working branch
-`claude/compassionate-ptolemy-7tbffc`.
+Date: 2026-11-03 (all times UTC, taken from file timestamps where given).
+Repo: `claude-code-web-context`.
 
-This document records what was tested in one cloud Claude Code session, what
-was observed, and what remains unknown. Findings are labeled **Measured**
-(directly observed in the session) or **Inferred** (a reasonable explanation
-that was not verified). Personal details (email address, mailbox contents,
+This document records what was tested in two cloud Claude Code conversations on
+the same repo, what was observed, and what remains unknown. The first
+conversation (branch `claude/compassionate-ptolemy-7tbffc`) ran in three
+`claude` processes: it was resumed twice. The second conversation (branch
+`claude/amazing-faraday-epuupd`) got its own VM. A timeline is in section 1.
+Findings are labeled **Measured** (directly observed in the session),
+**Inferred** (a reasonable explanation that was not verified), or
+**User-observed** (reported by the user, not captured by the model). Personal details (email address, mailbox contents,
 account identifiers) are deliberately left out.
 
 ## 1. Summary of findings
@@ -76,6 +79,38 @@ account identifiers) are deliberately left out.
 17. This environment offers slash commands like local Claude Code, including
     `/reload-skills`. Desktop/Web does not. The user saw this at the prompt;
     the model cannot see the menu. (User-observed, T16)
+
+### Timeline (UTC)
+
+Times in parentheses are GitHub commit times recorded at UTC-8 and converted.
+A tilde marks a time that was not recorded exactly.
+
+| Time | Event | Source |
+|---|---|---|
+| 16:19-16:20:43 | First conversation's VM boots; repo cloned; `~/.claude` provisioned | File timestamps |
+| 16:20:45 | Process 90 starts; startup context and system prompt recorded | Transcript |
+| 16:23:39 | First Bash call (shell snapshot created) | File timestamp |
+| ~16:39 | "Kung Fu" memory test; nothing written to disk (T3) | Transcript |
+| 16:44:00 | User commits the rule file on GitHub (`0f7a971`) | Commit date |
+| ~16:47 | Model fast-forwards to the rule commit; file now on disk (T5) | File timestamp |
+| 16:48:27 | Last transcript entry before an idle gap | Transcript |
+| 16:53:18 | User creates `SKILL.md` on GitHub (`aa615e4`) | Commit date |
+| 16:54:19 | **Resume 1**: process 103 starts (`resume` mode) | `ps`, `sessions/` |
+| 16:54:35 | Rule text injected into the model's context (T5, T11) | Transcript |
+| 16:58:38 | `goose-expert` agent committed; not listed or invocable (T6) | Commit date |
+| 17:07:29 | Reference document uploaded | File timestamp |
+| 17:10:40 | First `investigation.md` commit | Commit date |
+| 17:29:02 | PR #1 merged on GitHub | Commit date |
+| 17:30:02 | Last transcript entry before a 38-minute idle gap | Transcript |
+| 17:32:09 | User edits `SKILL.md` on GitHub (`ef2c3c2`) | Commit date |
+| 17:32:49-50 | **Second conversation**: its own VM boots, session created (T12e) | Second conversation's record |
+| 17:42:27-18:02:29 | Second conversation commits T12 and T13 results | Commit dates |
+| 18:07:38 | PR #2 merged on GitHub | Commit date |
+| 18:07:51 | **Resume 2**: process 104 starts (T14) | `ps`, `sessions/` |
+| 18:08:28 | First user entry after resume 2 | Transcript |
+| ~18:15 | Model fast-forwards to `main`; skill on disk (T15) | Not recorded exactly |
+| 18:19:09 | Marker file written (T14, result pending) | File timestamp |
+| a few turns later | `las-vegas-piece` listing arrives; skill invoked (T15) | Transcript |
 
 ## 2. Starting context
 
@@ -384,11 +419,12 @@ Notes on the layout:
   seen during the session are a built-in CLI attachment type, not output from
   the hook scripts.
 
-### T12. Fresh session on the branch (second session, 2026-11-03)
+### T12. Fresh conversation on the repo (second conversation, 2026-11-03)
 
-A new session was started after the first one ended. It ran on its own branch,
-`claude/amazing-faraday-epuupd`, cut from `main` after PR #1's branch was
-pushed. These results come from that session.
+A second conversation was started while the first one was idle (the first
+conversation had no entries between 17:30:02 and 18:08:28). It got its own VM
+and its own branch, `claude/amazing-faraday-epuupd`, cut from `main` after PR
+#1's branch was pushed. These results come from that conversation.
 
 - **T12a. Restart test (proposed test 7.1, open question 3). Measured.**
   - `.claude/CLAUDE.md` (`Keyword: Umbrella`) and
