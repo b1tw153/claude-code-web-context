@@ -42,6 +42,25 @@ account identifiers) are deliberately left out.
 9. The session was resumed in a new `claude` process at 16:54:19, launched by
    the environment manager in "resume" mode. The session ID stayed the same.
    (Measured; the reason for the resume is unknown)
+10. In a second, new conversation on the same repo, `CLAUDE.md`, the rule, the
+    `goose-expert` agent and the `las-vegas-piece` skill all loaded at startup,
+    so the mid-session limits in findings 4 and 6 are load-time behavior, as in
+    local Claude Code. (Measured, T12a)
+11. Subagents receive the project instruction files by injection, verified from
+    the subagent transcript: no file was read and the rule text is in the
+    transcript before the agent answered. (Measured, T12d)
+12. Each conversation gets its own VM, booted about a second before the session
+    is created. Nothing from a previous conversation is on the VM's disk except
+    the git repo. The previous transcript was readable only through the
+    server-side `list_sessions` and `list_events` calls, and nothing loads it
+    automatically. (Measured, T12c and T12e)
+13. The harness (`environment-manager` and `claude`) runs as root, and the
+    `claude` user owns no running process. The reason is not determined.
+    (Measured, T12e)
+14. `launcher-settings.json` registers two hooks (`SessionStart` and `Stop`)
+    and denies the model read access to the harness tokens and edit access to
+    the harness control files. These are tool-level rules, not an OS boundary,
+    since the shell runs as root. (Measured, T13)
 
 ## 2. Starting context
 
@@ -350,6 +369,122 @@ Notes on the layout:
   seen during the session are a built-in CLI attachment type, not output from
   the hook scripts.
 
+### T12. Fresh session on the branch (second session, 2026-11-03)
+
+A new session was started after the first one ended. It ran on its own branch,
+`claude/amazing-faraday-epuupd`, cut from `main` after PR #1's branch was
+pushed. These results come from that session.
+
+- **T12a. Restart test (proposed test 7.1, open question 3). Measured.**
+  - `.claude/CLAUDE.md` (`Keyword: Umbrella`) and
+    `.claude/rules/minimegastructures.md` were both in context from the first
+    turn, before any file was read. The rule is unscoped and arrived in the
+    startup system reminder.
+  - `goose-expert` was in the startup agent list and the Agent tool accepted it
+    by name. This confirms T6: the agent was missing earlier only because
+    `.claude/agents/` did not exist when that process started.
+  - A project skill (`las-vegas-piece`, in `.claude/skills/`) was listed at
+    startup and ran when invoked. Project skills, agents, `CLAUDE.md` and
+    rules all load at launch.
+- **T12b. Memory test ("granola"). Measured.** At the end of the first session
+  the user asked the model to remember "granola" without it being written to a
+  file. The new session did not know it. Auto memory is still absent: no memory
+  instructions or memory tool appeared. This is the predicted outcome.
+- **T12c. Session transcripts as a reference. Measured.**
+  - The previous session's transcript is readable from a new session through
+    `list_sessions` and `list_events` (claude-code-remote tools). The "granola"
+    request was found there.
+  - Nothing loads transcripts automatically. The new session found it only
+    because the user asked and the model went looking.
+  - The raw event list was about 290K characters for 66 events, too large to
+    read directly; it had to be parsed with a script.
+  - This is a lookup record, not memory.
+- **T12d. Subagent inheritance (proposed test 7.2, open question 4). Measured.**
+  - `goose-expert` has only the `Read` tool. It was asked what
+    minimegastructures are, and told not to read files.
+  - It answered that it knew of no established meaning but that "the project
+    rule already in my context" says "Most minimegastructures are ducks".
+  - Project rules in `.claude/rules/` therefore reach subagents, as the
+    reference document says.
+  - Only the rule text was inherited; the agent had no other knowledge of the
+    term.
+  - **Verified from the subagent transcript**
+    (`projects/.../<session-id>/subagents/agent-<id>.jsonl`):
+    - The only tool call was `SubagentHandback`, which delivers the report.
+      There was no `Read`. The `tool_uses: 1` in the usage line was the
+      hand-back call. A trivial goose question to the same agent also showed
+      `tool_uses: 1` and also contains only the hand-back.
+    - The rule text is in the subagent's transcript before it answered, as an
+      `instructions` attachment (`.claude/rules/minimegastructures.md`, type
+      `Project`) and inside a `system-reminder` block headed "project
+      instructions, checked into the codebase".
+    - Inheritance is therefore by injection: the harness gives subagents the
+      project instruction files directly.
+- **T12e. VM per conversation and what carries over. Measured and inferred.**
+  - The new session's VM booted at 17:32:49, one second before the session was
+    created (17:32:50). The user confirmed the second session was a new
+    conversation that happened to use the same git repo.
+  - On the VM's disk, `/root/.claude/projects/` held only this session's
+    transcript and its subagent transcripts. No other session's `.jsonl`
+    exists anywhere under `/root` or `/home`. The previous session's
+    transcript was readable only through the server-side `list_events` call,
+    not from the disk.
+  - What reached the VM from the first session was the git repo
+    (`investigation.md`, the rule, the agent, the skill). The repo and the
+    transcript API are the only persistent state seen.
+  - Process owner (Q5): `environment-manager` (pid 150) and `claude` (pid 166)
+    both run as root, started by PID 1 (`process_api --firecracker-init`). No
+    process runs as the `claude` user (uid 999). The harness files in
+    `/home/claude/.claude/` (hook scripts, `launcher-settings.json`, OAuth and
+    session-ingress tokens) are root-owned, written at 17:32:55 after boot.
+    The `claude` user exists from the image build (Oct 27) and owns only its
+    `.cache`, `.config` and `.ssh`. Why the harness runs as root is still not
+    determined (Inferred: the image was built for a non-root user, but the
+    harness runs as root and uses `/home/claude` as a state directory).
+  - `environment-manager` was started with `--session-mode resume-cached`.
+    The first session's relaunch used `resume`. Because this was a new
+    conversation with no history, the mode flag appears to be the harness's
+    normal launch path and is **not** evidence that a stop and restore
+    occurred. An earlier inference in this session that it was evidence was
+    retracted.
+  - Files dated 16:19:54 under `/home/claude` on a VM booted at 17:32:49 are
+    unexplained. A cached environment snapshot built when the first session
+    started is the likeliest cause (Inferred, not verified).
+  - **Not tested:** whether a session that is parked and picked up later keeps
+    files that are not part of the git repo. A test would write a marker file
+    outside the repo, let the session sit idle, then look for the file after it
+    is picked up. The 16:54:19 relaunch in the first session might have been
+    such a case, but whether non-git files survived it was not recorded.
+
+### T13. `launcher-settings.json` (open question 6)
+
+- **Method:** Read `/root/.claude/launcher-settings.json` with values redacted
+  where a key or value looked like a credential. Compared it with the copy in
+  `/home/claude/.claude/`.
+- **Result (Measured):**
+  - The two copies are byte-identical. The file contains no credentials.
+  - It is a Claude Code settings file (`$schema`:
+    `json.schemastore.org/claude-code-settings.json`).
+  - **Hooks (two):** `SessionStart` runs
+    `~/.claude/session-start-setup-script-failure.sh`, and `Stop` runs
+    `~/.claude/stop-hook-git-check.sh`. This is why the stop hook produces the
+    "unpushed commit" feedback.
+  - `user-prompt-submit-reply-reminder.py` is not registered as a hook. It
+    appears only in the deny list. This confirms it is inert here.
+  - **Permissions:** `allow` is only `Skill`. `deny` has two groups:
+    - Read: `~/.claude/remote` (holds the OAuth and session-ingress tokens)
+      and `/run/ccr`.
+    - Edit: `launcher-settings.json`, `stop-hook-git-check.sh` and
+      `user-prompt-submit-reply-reminder.py`, under the `~`, `/root` and
+      `/home/claude` path spellings.
+- **Conclusion:** The harness registers two hooks and protects its credentials
+  and its own control files from the model through permission rules. These rules
+  do not stop a root shell: Bash runs as root and could read or change those
+  files, so this is a guardrail on the tools, not an operating-system
+  boundary. The denied paths were not accessed.
+- **Not determined:** How the file reaches the CLI (a `--settings` flag or a
+  settings lookup). The `claude` process arguments were not checked for it.
+
 ## 5. Comparison with the uploaded reference document
 
 | Area | Document says | Observed | Fit |
@@ -373,32 +508,56 @@ environment instructions).
    the new process also pick up edits to an existing `CLAUDE.md`?
 2. Why is auto memory absent: a setting, a cloud-harness default, or something
    else?
-3. Does a fresh session on this branch list `goose-expert` at startup and
-   include the minimegastructures rule in context from the start?
-4. Do subagents inherit project rules? The reference document says they do.
+3. ~~Does a fresh session on this branch list `goose-expert` at startup and
+   include the minimegastructures rule in context from the start?~~ **Answered
+   (T12a):** yes to both.
+4. ~~Do subagents inherit project rules? The reference document says they do.~~
+   **Answered (T12d):** yes, by injection, verified from the subagent
+   transcript.
 5. Why does the session run as root when a `claude` user exists?
-6. What does `launcher-settings.json` register (not read yet)?
+6. ~~What does `launcher-settings.json` register (not read yet)?~~
+   **Answered (T13):** two hooks (`SessionStart`, `Stop`) plus permission rules
+   that protect the harness's tokens and control files. How the file reaches the
+   CLI is not determined.
 
 ## 7. Proposed next tests
 
-1. **Restart test:** start a fresh session on this branch and ask about
-   minimegastructures and about `goose-expert` without any hints.
-2. **Subagent inheritance:** ask `goose-expert` (Read tool only) what
+1. ~~**Restart test:** start a fresh session on this branch and ask about
+   minimegastructures and about `goose-expert` without any hints.~~ **Done
+   (T12a).**
+2. ~~**Subagent inheritance:** ask `goose-expert` (Read tool only) what
    minimegastructures are. If rules reach subagents it should answer "ducks"
-   without reading a file.
-3. **Path-scoped rule:** add a rule with a `paths:` glob and check that it loads
-   only when a matching file is touched.
-4. **Nested `CLAUDE.md`:** add one in a subdirectory and check that it loads
-   only after a file in that directory is read.
-5. **Existing-file edit:** change `.claude/CLAUDE.md` mid-session and see
-   whether the new text is injected.
-6. **Auto memory:** in a fresh session, check for a `memory/` directory and any
-   memory-related settings.
-7. **Validate the agent file** with `claude --debug` or
-   `claude plugin validate .claude/agents`.
-8. **Same-process rule test:** add a rule file to a rules directory that
+   without reading a file.~~ **Done (T12d),** including the check of the
+   subagent transcript for a `Read` call (none).
+3. ~~**Path-scoped rule:** add a rule with a `paths:` glob and check that it
+   loads only when a matching file is touched.~~ **Skipped:** documented local
+   Claude Code behavior, not specific to this environment.
+4. ~~**Nested `CLAUDE.md`:** add one in a subdirectory and check that it loads
+   only after a file in that directory is read.~~ **Skipped:** same reason.
+5. ~~**Existing-file edit:** change `.claude/CLAUDE.md` mid-session and see
+   whether the new text is injected.~~ **Skipped:** same reason.
+6. ~~**Auto memory:** in a fresh session, check for a `memory/` directory and
+   any memory-related settings.~~ **Partly done (T12b):** the second session
+   also had no memory instructions or memory tool. A `memory/` directory
+   under `projects/` was not checked for.
+7. ~~**Validate the agent file** with `claude --debug` or
+   `claude plugin validate .claude/agents`.~~ **Moot:** the agent loaded and ran
+   in the second session (T12a), so the file is valid.
+8. ~~**Same-process rule test:** add a rule file to a rules directory that
    already existed at the start of the current process, without a resume, and
-   check whether live watching picks it up.
+   check whether live watching picks it up.~~ **Skipped:** same reason as 3-5.
+
+Tests worth running because they are specific to the cloud environment:
+
+9. **Parked-session persistence:** write a marker file outside the repo, let
+   the session sit idle, then check for it after the session is picked up.
+   This also bears on open question 1 (the 16:54:19 relaunch).
+10. **Idle gap before the relaunch:** read the first session's transcript for
+    the time between its last activity and 16:54:19, to test the idle-stop
+    explanation.
+11. **Continuity note:** add a line to `.claude/CLAUDE.md` telling a new session
+    to check recent sessions for prior context, then repeat the "remember X"
+    test in a fresh conversation to see whether it recovers X.
 
 ## 8. Corrections and caveats
 
