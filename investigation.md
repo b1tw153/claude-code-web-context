@@ -1,13 +1,17 @@
 # Investigation: How a Claude Code Web Session Loads Context
 
-Date of session: 2026-11-03 (all times UTC, taken from file timestamps where
-given). Repo: `claude-code-web-context`, working branch
-`claude/compassionate-ptolemy-7tbffc`.
+Dates: 2026-11-03 and 2026-11-04 (all times UTC, taken from file timestamps
+where given).
+Repo: `claude-code-web-context`.
 
-This document records what was tested in one cloud Claude Code session, what
-was observed, and what remains unknown. Findings are labeled **Measured**
-(directly observed in the session) or **Inferred** (a reasonable explanation
-that was not verified). Personal details (email address, mailbox contents,
+This document records what was tested in two cloud Claude Code conversations on
+the same repo, what was observed, and what remains unknown. The first
+conversation (branch `claude/compassionate-ptolemy-7tbffc`) ran in four
+`claude` processes: it was relaunched three times. The second conversation (branch
+`claude/amazing-faraday-epuupd`) got its own VM. A timeline is in section 1.
+Findings are labeled **Measured** (directly observed in the session),
+**Inferred** (a reasonable explanation that was not verified), or
+**User-observed** (reported by the user, not captured by the model). Personal details (email address, mailbox contents,
 account identifiers) are deliberately left out.
 
 ## 1. Summary of findings
@@ -61,6 +65,63 @@ account identifiers) are deliberately left out.
     and denies the model read access to the harness tokens and edit access to
     the harness control files. These are tool-level rules, not an OS boundary,
     since the shell runs as root. (Measured, T13)
+15. Within one conversation the disk persists across `claude` relaunches. The
+    first conversation was relaunched three times (16:54:19, 18:07:51 and, the
+    next day, 00:37:27). Its git repo, `~/.claude` and other non-git files were
+    intact each time, including a marker file written at 18:19:09 and found
+    after a VM reboot 6 h 18 min later. The third relaunch was a full VM boot
+    (uptime 61 s at the check, PID 1 started at 00:37:24) on a newer CLI
+    version. The earlier two look like reboots too (low PIDs), but uptime was
+    not recorded for them. Each relaunch followed a long idle gap (5 min 52 s,
+    37 min 49 s and 5 h 56 min) and started seconds before the user's next
+    message, but an 8 min 16 s gap with no relaunch markers shows that idle
+    duration alone is not the trigger. (Measured, T14; the trigger and the
+    earlier reboots are Inferred)
+16. A project skill committed on GitHub was not available to the running
+    conversation. The model answered a question about it from general
+    knowledge, because the skill file was on the remote but not in the working
+    tree. It appeared on disk only after a fetch and merge. A few turns after
+    the merge a listing update reached the running process without a reload or
+    restart, and the skill then ran when invoked. (Measured, T15)
+17. This environment offers slash commands like local Claude Code, including
+    `/reload-skills`. Desktop/Web does not. The user saw this at the prompt;
+    the model cannot see the menu. (User-observed, T16)
+
+### Timeline (UTC)
+
+Times in parentheses are GitHub commit times recorded at UTC-8 and converted.
+A tilde marks a time that was not recorded exactly.
+
+| Time | Event | Source |
+|---|---|---|
+| 16:19-16:20:43 | First conversation's VM boots; repo cloned; `~/.claude` provisioned | File timestamps |
+| 16:20:45 | Process 90 starts; startup context and system prompt recorded | Transcript |
+| 16:23:39 | First Bash call (shell snapshot created) | File timestamp |
+| ~16:39 | "Kung Fu" memory test; nothing written to disk (T3) | Transcript |
+| 16:44:00 | User commits the rule file on GitHub (`0f7a971`) | Commit date |
+| ~16:47 | Model fast-forwards to the rule commit; file now on disk (T5) | File timestamp |
+| 16:48:27 | Last transcript entry before an idle gap | Transcript |
+| 16:53:18 | User creates `SKILL.md` on GitHub (`aa615e4`) | Commit date |
+| 16:54:19 | **Resume 1**: process 103 starts (`resume` mode) | `ps`, `sessions/` |
+| 16:54:35 | Rule text injected into the model's context (T5, T11) | Transcript |
+| 16:58:38 | `goose-expert` agent committed; not listed or invocable (T6) | Commit date |
+| 17:07:29 | Reference document uploaded | File timestamp |
+| 17:10:40 | First `investigation.md` commit | Commit date |
+| 17:29:02 | PR #1 merged on GitHub | Commit date |
+| 17:30:02 | Last transcript entry before a 38-minute idle gap | Transcript |
+| 17:32:09 | User edits `SKILL.md` on GitHub (`ef2c3c2`) | Commit date |
+| 17:32:49-50 | **Second conversation**: its own VM boots, session created (T12e) | Second conversation's record |
+| 17:42:27-18:02:29 | Second conversation commits T12 and T13 results | Commit dates |
+| 18:07:38 | PR #2 merged on GitHub | Commit date |
+| 18:07:51 | **Resume 2**: process 104 starts (T14) | `ps`, `sessions/` |
+| 18:08:28 | First user entry after resume 2 | Transcript |
+| ~18:15 | Model fast-forwards to `main`; skill on disk (T15) | Not recorded exactly |
+| 18:19:09 | Marker file written (T14, result pending) | File timestamp |
+| a few turns later | `las-vegas-piece` listing arrives; skill invoked (T15) | Transcript |
+| 18:21:58-18:30:14 | 8 min 16 s idle gap with no relaunch markers (T14) | Transcript |
+| 18:40:40 | Last transcript entry of day 1 | Transcript |
+| 00:37:24 (Nov 4) | **VM boots again**, 6 h 18 min after the marker was written; `claude` pid 104 starts at 00:37:27 on CLI 2.1.318; marker, repo and transcript intact (T14) | `uptime`, `ps`, `sessions/` |
+| later | User finds the marker absent in a separate conversation | User-observed |
 
 ## 2. Starting context
 
@@ -169,7 +230,7 @@ read. `<org-id>` stands for the account's organization identifier, and
 |       `-- <session-id>/              subagents/, ccr-tip.json
 |-- session-env/<session-id>/
 |-- session-start-setup-script-failure.sh
-|-- sessions/                  103.json, 103.<hash>.key   (90.* from the first process is gone)
+|-- sessions/                  104.json (third process; the 90.* and 103.* entries of the earlier processes were replaced)
 |-- shell-snapshots/           snapshot-bash-<epoch>-<id>.sh
 |-- skills/
 |   |-- session-start-hook/    SKILL.md
@@ -369,11 +430,12 @@ Notes on the layout:
   seen during the session are a built-in CLI attachment type, not output from
   the hook scripts.
 
-### T12. Fresh session on the branch (second session, 2026-11-03)
+### T12. Fresh conversation on the repo (second conversation, 2026-11-03)
 
-A new session was started after the first one ended. It ran on its own branch,
-`claude/amazing-faraday-epuupd`, cut from `main` after PR #1's branch was
-pushed. These results come from that session.
+A second conversation was started while the first one was idle (the first
+conversation had no entries between 17:30:02 and 18:08:28). It got its own VM
+and its own branch, `claude/amazing-faraday-epuupd`, cut from `main` after PR
+#1's branch was pushed. These results come from that conversation.
 
 - **T12a. Restart test (proposed test 7.1, open question 3). Measured.**
   - `.claude/CLAUDE.md` (`Keyword: Umbrella`) and
@@ -455,6 +517,8 @@ pushed. These results come from that session.
     outside the repo, let the session sit idle, then look for the file after it
     is picked up. The 16:54:19 relaunch in the first session might have been
     such a case, but whether non-git files survived it was not recorded.
+  - **Update:** T14 later showed that non-git files in the first conversation
+    survived both of its resumes.
 
 ### T13. `launcher-settings.json` (open question 6)
 
@@ -485,6 +549,141 @@ pushed. These results come from that session.
 - **Not determined:** How the file reaches the CLI (a `--settings` flag or a
   settings lookup). The `claude` process arguments were not checked for it.
 
+### T14. Resumes within one conversation (first conversation, third process)
+
+Measured in the first conversation after the user switched to another
+conversation and came back.
+
+- **Process and identity:**
+  - A third `claude` process (pid 104) started at 18:07:51. `sessions/103.json`
+    was replaced by `sessions/104.json`. The session ID is unchanged, and
+    `/root/.claude/projects/...` still has its 16:20 creation time. The
+    transcript is the same file, 1.17 MB at that point and still growing.
+  - The user described the switch as a "restart". It was a resume of the same
+    conversation, not a new session. A recall test ("granola") run inside this
+    conversation would therefore prove nothing; T12b is the valid test.
+- **What persisted across the resume (Measured):**
+  - Git state exactly as left: branch clean at `8e8d836`, in sync with its
+    remote, no stashes, no untracked files.
+  - `~/.claude`: the transcript, `uploads/` (reference document, 17:07:29),
+    and the subagent transcript (16:56:28).
+  - Scratch files outside the repo: `scratchpad/phrases.txt` (17:20:03) and
+    the `tasks/` directory with its link to the subagent transcript (16:56:06).
+    All were created before the 18:07:51 resume and were present after it.
+  - No purpose-made marker file was written, so this is indirect evidence.
+- **What was re-read (Measured):** `goose-expert` was not in the process-90 or
+  process-103 agent lists. On the first turn after the 18:07:51 resume the model
+  received a message "New agent types are now available" naming `goose-expert`.
+  The file had been committed at 16:58:38, after process 103 started at
+  16:54:19, so each process saw the directory as it was at its own start. This
+  repeats the T6 explanation with a second process. The listing arrived as an
+  addition (a delta), not as a fresh startup listing.
+- **Idle gaps before each resume (Measured, from `user` and `assistant`
+  entries in the transcript):**
+
+  | Resume | Last entry before | New process | Next entry | Idle before the process start | Process start before next entry |
+  |---|---|---|---|---|---|
+  | 1 | 16:48:27 | 16:54:19 | 16:54:35 (user) | 5 min 52 s | 16 s |
+  | 2 | 17:30:02 | 18:07:51 | 18:08:28 (user) | 37 min 49 s | 37 s |
+  | 3 | 18:40:40 (day 1) | 00:37:27 (day 2) | 00:37:38 (user) | 5 h 56 min | 11 s |
+
+  The largest gaps between consecutive entries were 5 h 56 min (relaunch 3),
+  38:26 (relaunch 2), **8:16** (18:21:58 to 18:30:14, no relaunch markers),
+  6:07 (relaunch 1), then 5:38, 4:49, 4:12 and 4:06 (none).
+- **What the harness re-injects after a relaunch (Measured, from the
+  transcript):** Only changes. Relaunch 1 added an `instructions` attachment
+  (the rule file). Relaunch 2 added an agent-listing delta (`goose-expert`).
+  Relaunch 3 added only a date-change notice, because the day had rolled over.
+  A `skill_listing` attachment at 18:19:09 arrived mid-process, with no
+  relaunch markers around it, and the marker file was written by the same pid.
+- **Conclusion (Inferred, revised):** The relaunches fit a harness that stops a
+  conversation it considers inactive (the third time, the VM was stopped and
+  its disk kept) and starts it again in resume mode when the user returns. An
+  idle threshold of roughly five to six minutes, which the first two
+  relaunches suggested, is contradicted by the 8 min 16 s gap, which had no
+  relaunch markers in the transcript. Idle duration alone does not explain the
+  relaunches. A trigger such as the user leaving the conversation view (for
+  GitHub or another conversation) fits all the long gaps, but it was not
+  tested. Process state during the 8:16 gap was not captured, so a missed
+  relaunch there is not fully excluded.
+- **Marker test (Measured):** A purpose-made marker file,
+  `/root/.claude/marker-test.txt`, was written at 18:19:09 UTC by pid 104. It is
+  outside the repo, so git does not carry it.
+  - In the first conversation after the third relaunch it was still there,
+    unchanged (220 bytes, modified 18:19:09), 6 h 18 min after it was written.
+  - The user checked in a separate conversation and the file was absent. This
+    matches one VM and disk per conversation (T12e).
+- **The third relaunch was a full VM boot (Measured):** At the check,
+  `/proc/uptime` read 61 s, PID 1 (`/process_api --firecracker-init`) had
+  started at 00:37:24, and the new `claude` process started at 00:37:27 with
+  CLI version 2.1.318 (the previous one was 2.1.317). The disk, repo,
+  transcript, uploads and scratch files all survived the reboot. The system
+  prompt says the container is reclaimed after a period of inactivity; for a
+  conversation that was resumed, the disk was kept through at least 5 h 56 min
+  of transcript idle time. How the CLI got updated is not known.
+- **PID reuse (Measured):** The marker's pass criterion (a different pid after
+  the next resume) could not discriminate, because the new process got pid 104
+  again. The file's modification time (18:19:09), earlier than the boot time
+  (00:37:24), is the evidence.
+- **Earlier relaunches (Inferred):** The pids at relaunch 1 (85, 88 and 103) and
+  relaunch 2 (104) are far below the 1511 seen for a shell at 17:24, which
+  suggests those were also VM reboots. Uptime was not recorded then, so this is
+  not proven.
+- **Coincidence with GitHub activity (Inferred, not tested):** The user's
+  commits on GitHub are timestamped UTC-8, the session's are UTC. `Create
+  SKILL.md` (`aa615e4`) at 08:53:18-08:00 is 16:53:18 UTC, 61 seconds before
+  resume 1. The merge of PR #2 at 10:07:38-08:00 is 18:07:38 UTC, 13 seconds
+  before resume 2. The user acting on GitHub and then coming back to this
+  conversation would produce the same timing, and GitHub activity was not
+  separated from the user's return. This conversation had no PR subscription.
+
+### T15. A project skill that exists only on the remote
+- **Setup (Measured):** The user added `.claude/skills/las-vegas-piece/SKILL.md`
+  on GitHub (`aa615e4` at 16:53:18 UTC, edited in `ef2c3c2` at 17:32:09 UTC).
+  This conversation's working tree was not updated, so the file was not on
+  disk and the skill was in no listing the model received.
+- **Question (about 18:08):** "Where is Walter De Maria's Las Vegas Piece?"
+- **Result (Measured):** The model answered from general knowledge: the Tule
+  Desert in Nevada, northeast of Las Vegas, with no precise location known to
+  it. It did not consult the skill. After a fast-forward to `main` the file is
+  on disk. It carries a specific coordinate for the work, which the model's
+  answer did not have. The coordinate and the answer were not compared further.
+- **Listing (Measured, added later):** A few turns after the fast-forward, and
+  just after the marker file in T14 was written (18:19:09), a message listing
+  `las-vegas-piece` as an available skill reached the model. It arrived in the
+  same process (pid 104), with no `/reload-skills` and no restart. The reference
+  document says a skills directory created after the process starts is read
+  only after `/reload-skills`, and `.claude/skills/` was not in the working
+  tree when process 104 started. What triggered the listing is not known.
+- **Invocation (Measured):** At the user's request the model invoked the skill
+  through the `Skill` tool. It ran and returned the body of `SKILL.md`: one
+  sentence giving a coordinate for the work.
+- **Conclusion:** A skill committed on GitHub is not part of a running
+  conversation until the repo is updated. Once the file was in the working
+  tree it was listed and ran in the same process without a reload step, which
+  is more permissive than the reference document describes. Whether
+  `/reload-skills` would have made the listing appear sooner was not tested.
+  This agrees with T4 and with T12a, where a new conversation cloned the repo
+  fresh and listed the skill at startup.
+- **Not verified:** the coordinate in the skill. The model had no source to
+  check it against.
+
+### T16. Slash commands (user-observed)
+- **Observation (user, not captured):** The user listed the `/` commands at the
+  prompt in this environment and reported they look more or less like local
+  Claude Code's, including commands such as `/reload-skills`. Claude
+  Desktop/Web has no such commands.
+- **What the model can confirm (Measured):** The session record shows
+  `entrypoint: remote` and `kind: interactive` with CLI version 2.1.317 (T11),
+  so the real CLI is running. The system prompt tells the model to invoke
+  `/<skill-name>` through the `Skill` tool, and bundled skills such as `init`,
+  `security-review`, `loop` and `simplify` are in the startup listing.
+- **Not captured:** the actual command list. The model cannot see the prompt's
+  menu. A pasted list or screenshot would make this a measured result.
+- **Conclusion (Inferred):** The slash-command menu comes with the CLI front
+  end, which is consistent with every other finding that this is Claude Code
+  and not the Desktop/Web context system.
+
 ## 5. Comparison with the uploaded reference document
 
 | Area | Document says | Observed | Fit |
@@ -494,6 +693,7 @@ pushed. These results come from that session.
 | Unscoped rule | Loads at launch | Added mid-session; loaded only after the process was resumed (T11) | Consistent with launch-time loading (resume re-reads) |
 | Auto memory | `~/.claude/projects/<project>/memory/`, `MEMORY.md` loaded at start; "remember" writes a file | No directory, no instructions, nothing written | Does not apply here |
 | Skills | Listed at start; user skills at `~/.claude/skills/`; account-synced skills exist | Listing at start; synced skills present | Matches |
+| New project skills directory | Read only after `/reload-skills` if created after the session starts | Not available until the pull; then listed in the running process a few turns later without a reload and invoked successfully (T15); a fresh conversation listed it at startup (T12a) | More permissive than the document |
 | Agents | Listed at start; directory watched; restart needed if `agents/` was missing at start | Not listed; Agent tool rejected it | Matches |
 | Project key | Follows the git toplevel | `projects/-home-user-claude-code-web-context/` | Matches |
 
@@ -503,9 +703,12 @@ environment instructions).
 
 ## 6. Open questions
 
-1. Why did the harness resume the session in a new process at 16:54:19, and
-   does it happen on a pattern (idle time, message count) or at random? Does
-   the new process also pick up edits to an existing `CLAUDE.md`?
+1. Why does the harness resume the session in a new process? **Partly
+   answered (T14):** all three relaunches followed long idle gaps and started
+   seconds before the user's next message, but an 8 min 16 s gap did not
+   trigger one, so idle duration alone is not the trigger. The user leaving the
+   conversation is a candidate. The exact trigger is not determined. Does the new process also pick up edits to an existing
+   `CLAUDE.md`? Not tested.
 2. Why is auto memory absent: a setting, a cloud-harness default, or something
    else?
 3. ~~Does a fresh session on this branch list `goose-expert` at startup and
@@ -549,15 +752,27 @@ environment instructions).
 
 Tests worth running because they are specific to the cloud environment:
 
-9. **Parked-session persistence:** write a marker file outside the repo, let
-   the session sit idle, then check for it after the session is picked up.
-   This also bears on open question 1 (the 16:54:19 relaunch).
-10. **Idle gap before the relaunch:** read the first session's transcript for
+9. ~~**Parked-session persistence:** write a marker file outside the repo, let
+   the session sit idle, then check for it after the session is picked up.~~
+   **Partly done (T14):** non-git files created before each resume were present
+   after it. A purpose-made marker written at 18:19:09 was found after a VM
+   reboot (T14), and absent in a separate conversation. **Done.**
+10. ~~**Idle gap before the relaunch:** read the first session's transcript for
     the time between its last activity and 16:54:19, to test the idle-stop
-    explanation.
+    explanation.~~ **Done (T14):** 5 min 52 s before resume 1 and 37 min 49 s
+    before resume 2.
 11. **Continuity note:** add a line to `.claude/CLAUDE.md` telling a new session
     to check recent sessions for prior context, then repeat the "remember X"
     test in a fresh conversation to see whether it recovers X.
+12. ~~**Skill after pull:** in a running conversation, fast-forward to a commit
+    that adds a project skill, then check whether it is listed or can be
+    invoked, and whether `/reload-skills` changes that (T15).~~ **Done (T15):**
+    listed without a reload and invoked successfully. Whether `/reload-skills`
+    would have been faster was not tested.
+13. **Relaunch trigger:** compare staying in the conversation view while idle
+    (for example 3, 5 and 10 minutes) with leaving it, and check the `sessions/`
+    file and process start times to see which produces a relaunch. Also record
+    `uptime` at each relaunch to separate reboots from process restarts.
 
 ## 8. Corrections and caveats
 
@@ -568,6 +783,23 @@ Tests worth running because they are specific to the cloud environment:
   later finding that the process was resumed (T11) replaced that conclusion.
 - An early statement that nothing had loaded after the merge was true at that
   moment and later superseded by the reminder in T5.
+- The first version of T15 said no listing update had reached the model. That
+  was true when written and was superseded by the later listing and the
+  successful invocation (T15).
+- The marker test's pass criterion (a different pid after the next resume) was
+  badly chosen: the VM rebooted and the new process got the same pid, 104. File
+  times were used instead (T14).
+- An earlier statement that "the VM persists" across resumes was too loose. The
+  disk persists; the VM itself was rebooted at least once (T14).
+- An earlier T14 note that a five-to-six-minute idle threshold would fit the data
+  was contradicted by a later 8 min 16 s gap with no relaunch (T14).
+- Commit times on GitHub's web UI are recorded at UTC-8 and the session's own
+  commits in UTC. An earlier note that the 09:xx commit times "did not line up
+  with a UTC session day" was a time-zone mismatch, confirmed from the ISO
+  author dates (T14, T15).
+- The "restart" the user performed in the first conversation was a resume of the
+  same session, so the "granola" recall in that conversation was not a valid
+  memory test (T14). T12b, in a new conversation, is the valid one.
 - Timestamps are from file metadata; turn-by-turn timing for events without a
   file (fetch, push) was not recorded.
 - Everything about Claude Code behavior beyond the observations above comes
