@@ -8,7 +8,7 @@ This document records what was tested in two cloud Claude Code conversations on
 the same repo, what was observed, and what remains unknown. The first
 conversation (branch `claude/compassionate-ptolemy-7tbffc`) ran in four
 `claude` processes: it was relaunched three times. The second conversation (branch
-`claude/amazing-faraday-epuupd`) got its own VM. A timeline is in section 1.
+`claude/amazing-faraday-epuupd`) got its own VM with a separate disk image. A timeline is in section 1.
 Findings are labeled **Measured** (directly observed in the session),
 **Inferred** (a reasonable explanation that was not verified), or
 **User-observed** (reported by the user, not captured by the model). Personal details (email address, mailbox contents,
@@ -38,34 +38,35 @@ account identifiers) are deliberately left out.
    the agent list and the Agent tool rejected it by name. This matches the
    documented restart requirement when the `agents/` directory did not exist
    at session start. (Measured)
-7. The Gmail connector is available and a read-only search worked. (Measured)
-8. The harness-supplied system prompt text (GitHub rules, git rules,
+7. The Gmail connector is available and a read-only search worked. The connector
+   settings are inherited from the user's claude.ai account. (Measured)
+9. The harness-supplied system prompt text (GitHub rules, git rules,
    environment notes) is not stored in any file that was found. It exists on
    disk only as a `prompt_snapshot` record in the session transcript. (Measured;
    delivery channel not found)
-9. The session was resumed in a new `claude` process at 16:54:19, launched by
+10. The session was resumed in a new `claude` process at 16:54:19, launched by
    the environment manager in "resume" mode. The session ID stayed the same.
    (Measured; the reason for the resume is unknown)
-10. In a second, new conversation on the same repo, `CLAUDE.md`, the rule, the
+11. In a second, new conversation on the same repo, `CLAUDE.md`, the rule, the
     `goose-expert` agent and the `las-vegas-piece` skill all loaded at startup,
     so the mid-session limits in findings 4 and 6 are load-time behavior, as in
     local Claude Code. (Measured, T12a)
-11. Subagents receive the project instruction files by injection, verified from
+12. Subagents receive the project instruction files by injection, verified from
     the subagent transcript: no file was read and the rule text is in the
     transcript before the agent answered. (Measured, T12d)
-12. Each conversation gets its own VM, booted about a second before the session
-    is created. Nothing from a previous conversation is on the VM's disk except
+13. Each conversation gets its own VM, booted about a second before the session
+    is created. Nothing from a previous, separate conversation is on the VM's disk except
     the git repo. The previous transcript was readable only through the
     server-side `list_sessions` and `list_events` calls, and nothing loads it
     automatically. (Measured, T12c and T12e)
-13. The harness (`environment-manager` and `claude`) runs as root, and the
+14. The harness (`environment-manager` and `claude`) runs as root, and the
     `claude` user owns no running process. The reason is not determined.
     (Measured, T12e)
-14. `launcher-settings.json` registers two hooks (`SessionStart` and `Stop`)
+15. `launcher-settings.json` registers two hooks (`SessionStart` and `Stop`)
     and denies the model read access to the harness tokens and edit access to
     the harness control files. These are tool-level rules, not an OS boundary,
     since the shell runs as root. (Measured, T13)
-15. Within one conversation the disk persists across `claude` relaunches. The
+16. Within one conversation the disk persists across `claude` relaunches. The
     first conversation was relaunched three times (16:54:19, 18:07:51 and, the
     next day, 00:37:27). Its git repo, `~/.claude` and other non-git files were
     intact each time, including a marker file written at 18:19:09 and found
@@ -77,13 +78,13 @@ account identifiers) are deliberately left out.
     message, but an 8 min 16 s gap with no relaunch markers shows that idle
     duration alone is not the trigger. (Measured, T14; the trigger and the
     earlier reboots are Inferred)
-16. A project skill committed on GitHub was not available to the running
-    conversation. The model answered a question about it from general
-    knowledge, because the skill file was on the remote but not in the working
+17. A project skill committed on GitHub was not available to the running
+    conversation. The model answered a question that prompted the skill from general
+    knowledge instead of using the skill, because the skill file was on the remote but not in the working
     tree. It appeared on disk only after a fetch and merge. A few turns after
     the merge a listing update reached the running process without a reload or
     restart, and the skill then ran when invoked. (Measured, T15)
-17. This environment offers slash commands like local Claude Code, including
+18. This environment offers slash commands like local Claude Code, including
     `/reload-skills`. Desktop/Web does not. The user saw this at the prompt;
     the model cannot see the menu. (User-observed, T16)
 
